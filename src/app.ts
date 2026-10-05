@@ -18,6 +18,18 @@ import { processInvoiceEmissions } from "./services/InvoiceEmission.service.js";
 import reportRoutes from "./routes/report.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import onboardingRoutes from "./routes/onboarding.routes.js";
+import universityRoutes from "./routes/university.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import reportingPeriodsRoutes from "./routes/reporting-periods.routes.js";
+import activityDataRoutes from "./routes/activity-data.routes.js";
+import physicalStructureRoutes from "./routes/physical-structure.routes.js";
+import notificationsRoutes from "./routes/notifications.routes.js";
+import emissionFactorsRoutes from "./routes/emission-factors.routes.js";
+import targetsRoutes from "./routes/targets.routes.js";
+import recommendationsRoutes from "./routes/recommendations.routes.js";
+import documentsRoutes from "./routes/documents.routes.js";
+import baselinesRoutes from "./routes/baselines.routes.js";
+import dataQualityRoutes from "./routes/data-quality.routes.js";
 import { authMiddleware } from "./middleware/auth.middleware.js";
 
 
@@ -35,6 +47,18 @@ app.use("/api/affinda", affindaTestRoutes);
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/onboarding", authMiddleware, onboardingRoutes);
+app.use("/api/v1/universities", authMiddleware, universityRoutes);
+app.use("/api/v1/dashboard", authMiddleware, dashboardRoutes);
+app.use("/api/v1/reporting-periods", authMiddleware, reportingPeriodsRoutes);
+app.use("/api/v1/activity-data", authMiddleware, activityDataRoutes);
+app.use("/api/v1/structure", authMiddleware, physicalStructureRoutes);
+app.use("/api/v1/notifications", authMiddleware, notificationsRoutes);
+app.use("/api/v1/emission-factors", authMiddleware, emissionFactorsRoutes);
+app.use("/api/v1/targets", authMiddleware, targetsRoutes);
+app.use("/api/v1/recommendations", authMiddleware, recommendationsRoutes);
+app.use("/api/v1/documents", authMiddleware, documentsRoutes);
+app.use("/api/v1/baselines", authMiddleware, baselinesRoutes);
+app.use("/api/v1/data-quality", authMiddleware, dataQualityRoutes);
 
 import path from "path";
 app.use("/reports", express.static(path.join(process.cwd(), "reports")));
