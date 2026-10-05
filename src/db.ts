@@ -1,5 +1,6 @@
 import pg from "pg";
 import dotenv from "dotenv";
+import { drizzle } from "drizzle-orm/node-postgres";
 
 dotenv.config();
 
@@ -7,7 +8,7 @@ const { Pool } = pg;
 
 const useSSL = process.env.DB_SSL === "true" || !!process.env.DATABASE_URL;
 
-const db = new Pool(
+export const pool = new Pool(
   process.env.DATABASE_URL
     ? {
         connectionString: process.env.DATABASE_URL,
@@ -23,6 +24,10 @@ const db = new Pool(
       }
 );
 
+export const db = drizzle(pool);
+
+export default db;
+
 console.log("DB ENV CHECK:", {
   usingConnectionString: !!process.env.DATABASE_URL,
   host: process.env.DB_HOST,
@@ -32,7 +37,3 @@ console.log("DB ENV CHECK:", {
   ssl: useSSL,
   passwordExists: Boolean(process.env.DB_PASSWORD) || Boolean(process.env.DATABASE_URL),
 });
-
-export const pool = db;
-
-export default db;

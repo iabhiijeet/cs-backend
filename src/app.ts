@@ -16,6 +16,9 @@ import { calculateIndiaFixedEmission } from "./services/IndiaFixedEmission.servi
 import { calculateIndiaEmission } from "./services/IndiaEmission.service.js";
 import { processInvoiceEmissions } from "./services/InvoiceEmission.service.js";
 import reportRoutes from "./routes/report.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import onboardingRoutes from "./routes/onboarding.routes.js";
+import { authMiddleware } from "./middleware/auth.middleware.js";
 
 
 const app = express();
@@ -29,6 +32,9 @@ app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 app.use("/api/report", reportRoutes);
 app.use("/api/erp", erpRoutes);
 app.use("/api/affinda", affindaTestRoutes);
+
+app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/onboarding", authMiddleware, onboardingRoutes);
 
 import path from "path";
 app.use("/reports", express.static(path.join(process.cwd(), "reports")));
