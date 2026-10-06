@@ -7,6 +7,30 @@ import { smartRailLookup } from "./IndiaRailwayRouteDB.js";
 import { fallbackLookup } from "./fallback/fallback.service.js";
 import { detectCategoryFromText } from "./CategoryDetection.service.js";
 
+// In-memory cache for emission factor lookups
+// Key: `${region}:${category}:${normalizedUnit}:${itemName}:${auState}:${ukFlightType}`
+const emissionFactorCache = new Map<string, { factor: any; timestamp: number }>();
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+
+/**
+ * Clear the emission factor cache.
+ * Call this when new emission factors are added to the database.
+ */
+export function clearEmissionFactorCache(): void {
+  emissionFactorCache.clear();
+  console.log("[CACHE CLEARED] Emission factor cache cleared");
+}
+
+/**
+ * Get cache stats for monitoring.
+ */
+export function getEmissionFactorCacheStats(): { size: number; keys: string[] } {
+  return {
+    size: emissionFactorCache.size,
+    keys: Array.from(emissionFactorCache.keys()),
+  };
+}
+
 type InvoiceEmissionItem = {
   item_name: string;
   category: string;
@@ -154,19 +178,8 @@ async function findLocalOfficialFactor(params: {
   description?: string;
   invoiceText?: string;    // full raw invoice text for AU state detection
 }) {
-  try {
-    const count = await pool.query(`SELECT COUNT(*) FROM official_emission_factors;`);
-    console.log("TOTAL FACTORS =", count.rows[0].count);
-    const auCount = await pool.query(`SELECT COUNT(*) FROM official_emission_factors WHERE region='AU';`);
-    console.log("AU FACTORS =", auCount.rows[0].count);
-  } catch (_e: any) {
-    console.warn("[findLocalOfficialFactor] Count check failed:", _e.message);
-  }
-
+  // Build cache key
   const normalizedInputUnit = normalizeUnit(params.unit);
-
-  // AU electricity: combine all available text for best state detection
-  // Priority: item_name → description → full invoice text (address/distributor fallback)
   const stateSearchText = [
     params.itemName,
     params.description,
@@ -180,6 +193,15 @@ async function findLocalOfficialFactor(params: {
   const ukFlightType = params.region === "GB" && (params.category.toLowerCase().includes("flight") || params.itemName.toLowerCase().includes("flight"))
     ? getUKFlightTypeKeyword(stateSearchText)
     : null;
+
+  const cacheKey = `${params.region}:${params.category}:${normalizedInputUnit}:${params.itemName}:${auState || "none"}:${ukFlightType || "none"}`;
+
+  // Check cache
+  const cached = emissionFactorCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log("[CACHE HIT] Emission factor:", cacheKey);
+    return cached.factor;
+  }
 
   console.log("AU STATE DETECTED:", auState, "| region:", params.region, "| category:", params.category);
   console.log("UK FLIGHT TYPE:", ukFlightType);
@@ -320,7 +342,15 @@ async function findLocalOfficialFactor(params: {
     row.unit ? areUnitsSame(params.unit, row.unit) : false
   );
 
-  return exactUnit || rows[0] || null;
+  const factor = exactUnit || rows[0] || null;
+
+  // Store in cache
+  if (factor) {
+    emissionFactorCache.set(cacheKey, { factor, timestamp: Date.now() });
+    console.log("[CACHE STORE] Emission factor:", cacheKey);
+  }
+
+  return factor;
 }
 
 function convertValueToFactorUnit(value: number, inputUnit: string, factorUnit: string) {

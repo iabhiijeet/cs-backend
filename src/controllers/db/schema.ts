@@ -163,7 +163,7 @@ export const documents = pgTable("documents", {
   originalName: varchar({ length: 255 }),
   mimeType: varchar({ length: 100 }),
   size: integer(),
-  url: varchar({ length: 500 }).notNull(),
+  url: text().notNull(),
   category: varchar({ length: 100 }),
   reportingPeriodId: integer().references(() => reportingPeriods.id),
   activityId: integer().references(() => activityData.id),

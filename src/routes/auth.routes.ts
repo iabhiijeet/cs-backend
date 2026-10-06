@@ -67,6 +67,7 @@ router.post("/login", async (req, res) => {
         user: {
           id: String(user.id),
           tenantId: user.tenantId ?? null,
+          organisationId: user.tenantId ?? null,
           name: user.name,
           email: user.email,
           role: user.role,
