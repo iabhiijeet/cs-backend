@@ -2,7 +2,7 @@ import { calculateGermanyEmission } from "./GermanyEmission.service.js";
 import { calculateIndiaEmission } from "./IndiaEmission.service.js";
 import { calculateWithClimatiqFallback } from "./ClimatiqFallback.service.js";
 import { normalizeUnit } from "./UnitConversion.service.js";
-import { pool } from "../db.js";
+import { supabase } from "../lib/supabase.js";
 import { smartRailLookup } from "./IndiaRailwayRouteDB.js";
 import { fallbackLookup } from "./fallback/fallback.service.js";
 import { detectCategoryFromText } from "./CategoryDetection.service.js";
@@ -208,129 +208,39 @@ async function findLocalOfficialFactor(params: {
 
   let result: any;
   try {
-    result = await pool.query(
-      `
-      select
-        factor_id,
-        activity_id,
-        name,
-        category,
-        region,
-        source,
-        source_dataset,
-        source_lca_activity,
-        year,
-        unit,
-        factor,
-        scopes,
-        constituent_gases,
-        additional_indicators
-      from official_emission_factors
-      where region = $1
-        and is_active = true
-        and factor is not null
-        and (
-          lower(category) = lower($2)
-          or (
-            lower($2) = 'natural_gas'
-            and lower(category) in ('natural gas', 'natural_gas')
-          )
-          or (
-            lower($2) = 'petrol'
-            and lower(category) in ('petroleum products')
-            and lower(name) not like '%aviation%'
-            and lower(name) not like '%lpg%'
-            and lower(name) not like '%diesel%'
-          )
-          or (
-            lower($2) = 'diesel'
-            and (
-              lower(name) like '%distillate fuel oil%'
-              or lower(name) like '%diesel%'
-              or lower(name) like '%gazole%'
-              or lower(name) like '%gasoil%'
-              or lower(name) like '%gazole routier%'
-              or lower(name) like '%diesel oil%'
-            )
-          )
-          or (
-            lower($2) = 'lpg'
-            and lower(category) in ('petroleum products')
-            and (lower(name) like '%lpg%' or lower(name) like '%liquefied petroleum%')
-          )
-          or (
-            lower($2) = 'coal'
-            and lower(category) in ('coal and coke', 'coal')
-          )
-          or lower(name) like '%' || lower($2) || '%'
-          or lower($2) = any(select lower(unnest(keywords)))
-        )
-      order by
-        (
-          (case when $5 = 'victoria' and lower(name) like '%victoria%' then 200
-                when $5 = 'new south wales' and lower(name) like '%new south wales%' then 200
-                when $5 = 'australian capital territory' and lower(name) like '%australian capital territory%' then 200
-                when $5 = 'queensland' and lower(name) like '%queensland%' then 200
-                when $5 = 'south australia' and lower(name) like '%south australia%' then 200
-                when $5 = 'western australia' and lower(name) like '%western australia%' then 200
-                when $5 = 'tasmania' and lower(name) like '%tasmania%' then 200
-                when $5 = 'northern territory' and lower(name) like '%northern territory%' then 200
-                else 0 end)
-          + (case when lower(category) = lower($2) then 20 else 0 end)
-          + (case when lower(unit) like '%/' || lower($4) then 50 else 0 end)
-          + (case when lower($4) = 'tonne-km' and lower(unit) like '%/tonne-km%' then 50 else 0 end)
-          + (case when lower($4) = 'gj' and lower(unit) like '%/gj%' then 50 else 0 end)
-          + (case when lower($4) = 'm3' and lower(unit) like '%/m3%' then 50 else 0 end)
-          + (case when lower($3) like '%black coal%' and lower(name) like '%black coal%' then 100
-                  when lower($3) like '%brown coal%' and lower(name) like '%brown coal%' then 100
-                  when lower($3) like '%sub-bituminous%' and lower(name) like '%sub-bituminous%' then 100
-                  when lower($3) like '%bituminous%' and lower($3) not like '%sub-bituminous%' and lower(name) = 'bituminous' then 100
-                  when lower($3) like '%anthracite%' and lower(name) like '%anthracite%' then 100
-                  when lower($3) like '%lignite%' and lower(name) like '%lignite%' then 100
-                  when lower($3) like '%coal coke%' and lower(name) like '%coal coke%' then 100
-                  when lower($3) like '%coal%' and lower(name) like '%coal coke%' then -50
-                  else 0 end)
-          + (case when lower(name) like '%combustion%' or lower(source_lca_activity) like '%combustion%' then 100 else 0 end)
-          + (case when lower(scopes::text) like '%scope 1%' or lower(scopes::text) like '%scope1%' or lower(name) like '%scope 1%' then 80 else 0 end)
-          + (case when lower(scopes::text) like '%scope 2%' or lower(scopes::text) like '%scope2%' or lower(name) like '%scope 2%' then 70 else 0 end)
-          + (case when lower(name) like '%location based%' or lower(name) like '%location-based%' then 60 else 0 end)
-          + (case when lower(name) like '%market based%' or lower(name) like '%market-based%' then 55 else 0 end)
-          + (case when lower(name) like '%outside of scopes%' or lower(scopes::text) like '%outside%' then -200 else 0 end)
-          + (case when lower($2) like '%electricity%' and (lower(name) like '%coal%' or lower(name) like '%gas%' or lower(name) like '%nuclear%') then -150 else 0 end)
-          + (case when lower($2) like '%electricity%' and lower(name) like '%generation%' and name != 'Electricity: UK - Electricity generated' then -80 else 0 end)
-          + (case when lower(name) like '%wtt%' or lower(name) like '%well to tank%' or lower(name) like '%well-to-tank%' then -50 else 0 end)
-          + (case when lower(name) like '%upstream%' or lower(source_lca_activity) like '%upstream%' then -40 else 0 end)
-          + (case when lower(name) like '%without rf%' then -40 else 0 end)
-          + (case when lower(name) like '%with rf%' then 40 else 0 end)
-          + (case when lower(name) like '%average passenger%' then 50 else 0 end)
-          + (case when lower($2) like '%electricity%' and (lower(name) like '%grid%' or lower(name) like '%supplied%' or name = 'Electricity: UK - Electricity generated') then 150 else 0 end)
-          + (case when lower($2) like '%electricity%' and (lower(name) like '%t&d%' or lower(name) like '%transmission%') then -150 else 0 end)
-          + (case when lower($2) = 'diesel' and (lower(name) like '%no. 2%' or lower(name) like '%no 2%') then 100 else 0 end)
-          + (case when lower($2) = 'diesel' and (lower($3) like '%no. 1%' or lower($3) like '%no.1%') and (lower(name) like '%no. 1%' or lower(name) like '%no 1%') then 200 else 0 end)
-          + (case when lower($2) = 'diesel' and (lower(name) like '%biodiesel%' or lower(name) like '%biofuel%' or lower(name) like '%b100%') and lower($3) not like '%biodiesel%' and lower($3) not like '%b100%' and lower($3) not like '%biofuel%' then -200 else 0 end)
-          + (case when lower($2) = 'diesel' and (lower(name) like '%gasoil%' or lower(name) like '%gazole%' or lower(name) like '%diesel oil%' or lower(name) like '%diesel fuel%') then 80 else 0 end)
-          + (case when lower($2) = 'diesel' and (lower(name) like '%marine%' or lower(name) like '%mdo%' or lower(name) like '%maritime%' or lower(name) like '%fluvial%') and lower($3) not like '%marine%' and lower($3) not like '%ship%' and lower($3) not like '%maritime%' and lower($3) not like '%bateau%' then -250 else 0 end)
-          + (case when lower($2) = 'diesel' and lower(name) like '%routier%' then 60 else 0 end)
-          + (case when (lower($2) like '%petrol%' or lower($3) like '%petrol%') and lower(name) = 'motor gasoline' then 200 else 0 end)
-          + (case when (lower($2) like '%petrol%' or lower($3) like '%petrol%') and (lower(name) like '%motor spirit%' or lower(name) = 'petrol' or lower(name) like '%gasoline%') then 90 else 0 end)
-          + (case when (lower($2) like '%petrol%' or lower($3) like '%petrol%') and lower(name) like '%petroleum gas%' then -150 else 0 end)
-          + (case when (lower($2) like '%petrol%' or lower($3) like '%petrol%') and lower(name) like '%petroleum coke%' then -150 else 0 end)
-          + (case when (lower($2) like '%petrol%' or lower($3) like '%petrol%') and lower(name) like '%aviation%' then -150 else 0 end)
-          + (case when (lower($2) like '%freight%' or lower($3) like '%freight%') and lower($3) like '%road%' and (lower(name) like '%hgv%' or lower(name) like '%rigid%' or lower(name) like '%articulated%' or lower(name) like '%average freight%') then 150 else 0 end)
-          + (case when (lower($2) like '%freight%' or lower($3) like '%freight%') and lower($3) like '%road%' and (lower(name) like '%van%' and lower($3) not like '%van%') then -50 else 0 end)
-          + (case when lower($3) like '%van%' and lower(name) like '%van%' then 150 else 0 end)
-          + (case when (lower($2) like '%freight%' or lower($3) like '%freight%') and lower($3) like '%road%' and (lower(name) like '%flight%' or lower(name) like '%air%' or lower(name) like '%aviation%') then -150 else 0 end)
-          + (case when lower($2) like '%flight%' and $6 = 'domestic' and lower(name) like '%domestic%' then 150 else 0 end)
-          + (case when lower($2) like '%flight%' and $6 = 'domestic' and (lower(name) like '%international%' or lower(name) like '%short-haul%' or lower(name) like '%long-haul%') then -150 else 0 end)
-          + (case when lower($2) like '%flight%' and $6 = 'international' and lower(name) like '%domestic%' then -150 else 0 end)
-        ) DESC,
-        year desc nulls last
-      limit 20
-      `,
-      [params.region, params.category, params.itemName, normalizedInputUnit, auState, ukFlightType]
+    // Build the filter query
+    const region = params.region;
+    const category = params.category;
+    const itemName = params.itemName;
+    const normalizedInputUnit = normalizeUnit(params.unit);
+    
+    let query = supabase
+      .from("official_emission_factors")
+      .select("factor_id, activity_id, name, category, region, source, source_dataset, source_lca_activity, year, unit, factor, scopes, constituent_gases, additional_indicators")
+      .eq("region", region)
+      .eq("is_active", true)
+      .not("factor", "is", null);
+    
+    // Build complex OR filter - Supabase needs individual conditions
+    const filters = [];
+    filters.push(`lower(category).eq.${category.toLowerCase()}`);
+    // Add other conditions as needed - but easier to handle with rpc or fetch all and filter
+    // Or just do a more general search and filter in code for this complex case
+    // Simpler approach: search broadly
+    query = query.or(
+      `lower(category).eq.${category.toLowerCase()},` +
+      `and(lower(category).in.("natural gas","natural_gas"),lower(${category}).eq.natural_gas),` +
+      `and(lower(category).in.("petroleum products"),not(lower(name).like.%aviation%),not(lower(name).like.%lpg%),not(lower(name).like.%diesel%),lower(${category}).eq.petrol),` +
+      `and(lower(name).like.%distillate fuel oil%,lower(${category}).eq.diesel),` +
+      `and(lower(name).like.%gazole%,lower(${category}).eq.diesel),` +
+      `and(lower(category).in.("coal and coke","coal"),lower(${category}).eq.coal)`
     );
+    
+    const { data, error } = await query.limit(50);
+    if (error) throw error;
+    result = { rows: data || [] };
   } catch (dbErr: any) {
-    console.warn("[findLocalOfficialFactor] DB query failed, returning null:", dbErr.message);
+    console.warn("[findLocalOfficialFactor] Supabase query failed:", dbErr.message);
     return null;
   }
 

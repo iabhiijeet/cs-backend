@@ -223,4 +223,28 @@ router.get("/review", authMiddleware, async (req: any, res) => {
   }
 });
 
+router.post("/:id/submit", authMiddleware, async (req: any, res) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: "Tenant context missing" });
+    }
+
+    const [record] = await db
+      .update(activityData)
+      .set({ status: "SUBMITTED", updatedAt: new Date() })
+      .where(and(eq(activityData.id, Number(req.params.id)), eq(activityData.tenantId, tenantId)))
+      .returning();
+
+    if (!record) {
+      return res.status(404).json({ success: false, message: "Activity data not found" });
+    }
+
+    return res.json({ success: true, data: record });
+  } catch (error: any) {
+    console.error("Submit activity data failed:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to submit activity data." });
+  }
+});
+
 export default router;

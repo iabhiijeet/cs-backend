@@ -1,4 +1,4 @@
-import { pool } from "../db.js";
+import { supabase } from "../lib/supabase.js";
 import { estimateWithClimatiq } from "./climatiq.service.js";
 import { searchClimatiqFactor } from "./ClimatiqSearch.service.js";
 import { normalizeUnit } from "./UnitConversion.service.js";
@@ -223,9 +223,9 @@ function convertForClimatiq(input: {
 
 async function getFallbackMapping(region: string, category: string) {
   try {
-    const result = await pool.query(
-      `
-      select
+    const { data, error } = await supabase
+      .from("emission_factor_mappings")
+      .select(`
         region,
         country_name,
         category,
@@ -236,19 +236,18 @@ async function getFallbackMapping(region: string, category: string) {
         parameter_name,
         parameter_unit,
         data_version
-      from emission_factor_mappings
-      where region = $1
-        and category = $2
-        and preferred_source = 'Climatiq'
-        and is_active = true
-      order by id asc
-      limit 1
-      `,
-      [region, category]
-    );
-    return result.rows[0] || null;
+      `)
+      .eq("region", region)
+      .eq("category", category)
+      .eq("preferred_source", "Climatiq")
+      .eq("is_active", true)
+      .order("id", { ascending: true })
+      .limit(1);
+
+    if (error) throw error;
+    return data?.[0] || null;
   } catch (err: any) {
-    console.warn(`[ClimatiqFallback] getFallbackMapping DB Error:`, err.message);
+    console.warn(`[ClimatiqFallback] getFallbackMapping Supabase Error:`, err.message);
     return null;
   }
 }

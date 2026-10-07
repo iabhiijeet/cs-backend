@@ -1,4 +1,4 @@
-import { pool } from "../db.js";
+import { supabase } from "../lib/supabase.js";
 
 type IndiaFixedInput = {
   category: string;
@@ -136,33 +136,22 @@ export async function calculateIndiaFixedEmission(input: IndiaFixedInput) {
 
   const searchCategory = input.category === "electricity_bill" ? "electricity" : input.category;
 
-  // Try DB first
+  // Try Supabase first (India fixed factors live in Supabase, not the Neon pool).
   try {
-    const result = await pool.query(
-      `
-      select
-        category,
-        factor_name,
-        factor,
-        unit,
-        source,
-        source_dataset,
-        year,
-        notes
-      from india_fixed_emission_factors
-      where (category = $1 or category = $2)
-        and is_active = true
-      order by year desc nulls last
-      limit 1
-      `,
-      [input.category, searchCategory]
-    );
-    if (result.rows[0]) {
-      const r = result.rows[0];
+    const { data, error } = await supabase
+      .from("india_fixed_emission_factors")
+      .select("category, factor_name, factor, unit, source, source_dataset, year, notes")
+      .eq("is_active", true)
+      .or(`category.eq.${input.category},category.eq.${searchCategory}`)
+      .order("year", { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    if (data && data[0]) {
+      const r = data[0];
       factorRow = { factor: Number(r.factor), unit: r.unit, factor_name: r.factor_name, source: r.source, source_dataset: r.source_dataset, year: r.year };
     }
   } catch (dbErr: any) {
-    console.warn(`[IndiaFixedEF] DB error for category=${input.category}:`, dbErr.message);
+    console.warn(`[IndiaFixedEF] Supabase error for category=${input.category}:`, dbErr.message);
   }
 
   // Fallback to hardcoded factors if DB is missing
